@@ -1374,16 +1374,19 @@ final class Session: CanvasHost {
         }
         let files = Library.frames(from: urls)
         guard !files.isEmpty else { status = "Nothing openable in the selection."; return }
+        if !frames.isEmpty { append(urls: urls); return }
         let new = FrameOrder.applied(to: Self.withPairs(files))
         if let selection, !new.contains(where: { $0.id == selection }) {
             enqueuePrintWriteback(for: selection)
         }
         ThumbnailCache.shared.clear()
         frames = new
+        persistCatalog()
         // One read per frame, for both things the library shows of it.
         let saved = new.map { ($0.id, Sidecar.load(for: $0.id)) }
         frameStates = Dictionary(uniqueKeysWithValues: saved.map { ($0.0, $0.1?.state ?? .unprocessed) })
         savedGeometry = Dictionary(uniqueKeysWithValues: saved.map { ($0.0, $0.1?.geometry ?? .default) })
+        editedFrames = Set(saved.filter { Self.hasEdits($0.1) }.map(\.0))
         filmEdgeThumbnails = Set(saved.filter { $0.1?.params.cutsFrame == true }.map(\.0))
         libraryTitle = urls.count == 1 ? urls[0].lastPathComponent : "\(files.count) files"
         renderer.store.removeAll()
