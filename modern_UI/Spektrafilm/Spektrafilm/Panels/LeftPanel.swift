@@ -43,6 +43,20 @@ struct LeftPanel: View {
     var body: some View {
         VStack(spacing: 0) {
             header
+            HStack(spacing: 8) {
+                Button { session.mediaLibraryVisible = true } label: {
+                    Label("Media Library", systemImage: "square.grid.2x2")
+                }
+                Button { session.openPanel() } label: {
+                    Image(systemName: "plus")
+                }.help("Add images without replacing the current filmstrip")
+            }
+            .buttonStyle(.plain)
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .sheet(isPresented: $session.mediaLibraryVisible) {
+                StudioMediaLibrary(session: session)
+            }
             Hairline()
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 0) {
