@@ -76,6 +76,51 @@ final class Session: CanvasHost {
     }
 
     var libraryTitle: String = ""
+    var mediaLibraryVisible = false
+    private(set) var editedFrames: Set<URL> = []
+    private static let studioCatalogKey = "SpektraLabStudio.catalog.v1"
+
+    private static func hasEdits(_ saved: Sidecar?) -> Bool {
+        guard let saved else { return false }
+        let initial = Sidecar()
+        return saved.params != initial.params || saved.decode != initial.decode
+            || saved.adjustments != initial.adjustments || saved.geometry != initial.geometry
+            || saved.masks != initial.masks || saved.noFilm != initial.noFilm
+    }
+
+    private func persistCatalog() {
+        UserDefaults.standard.set(frames.map { $0.id.standardizedFileURL.path },
+                                  forKey: Self.studioCatalogKey)
+    }
+
+    private func restoreCatalog() {
+        let paths = UserDefaults.standard.stringArray(forKey: Self.studioCatalogKey) ?? []
+        let available = paths.map { URL(fileURLWithPath: $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path) }
+        append(urls: available, restoring: true)
+    }
+
+    /// Import without replacing the active selection or renderer.
+    func append(urls: [URL], restoring: Bool = false) {
+        guard !batchExporting else { return }
+        let existing = Set(frames.map { $0.id.standardizedFileURL })
+        let additions = Library.frames(from: urls).filter {
+            !existing.contains($0.id.standardizedFileURL)
+        }
+        guard !additions.isEmpty else { return }
+        let prepared = Self.withPairs(additions)
+        frames.append(contentsOf: prepared)
+        for frame in prepared {
+            let saved = Sidecar.load(for: frame.id)
+            frameStates[frame.id] = saved?.state ?? .unprocessed
+            savedGeometry[frame.id] = saved?.geometry ?? .default
+            if saved?.params.cutsFrame == true { filmEdgeThumbnails.insert(frame.id) }
+            if Self.hasEdits(saved) { editedFrames.insert(frame.id) }
+        }
+        libraryTitle = "Studio · \(frames.count) photos"
+        if !restoring { persistCatalog() }
+    }
+
 
     // MARK: the current frame
     var sidecar = Sidecar() {
@@ -1108,6 +1153,7 @@ final class Session: CanvasHost {
         }) }
         sidecarWatch.start { [weak self] in self?.sidecarStoreChanged() }
         bootTask = warmUp()
+        restoreCatalog()
     }
 
     /// Start the service and pay for its imports before anyone asks it to do
@@ -1403,12 +1449,13 @@ final class Session: CanvasHost {
         status = "\(frames.count) frames · pick one in the filmstrip to develop."
     }
 
-    func openPanel() { let urls = Library.chooseFilesOrFolder(); if !urls.isEmpty { open(urls: urls) } }
+    func openPanel() { let urls = Library.chooseFilesOrFolder(); if !urls.isEmpty { append(urls: urls) } }
 
     /// Re-read a frame's sidecar state — used after a reset from the grid.
     func refreshState(for url: URL) {
         let saved = Sidecar.load(for: url)
         frameStates[url] = saved?.state ?? .unprocessed
+        if Self.hasEdits(saved) { editedFrames.insert(url) } else { editedFrames.remove(url) }
         savedGeometry[url] = saved?.geometry ?? .default
         if url == selection { sidecar = Sidecar.load(for: url) ?? Sidecar() }
     }
@@ -1483,7 +1530,9 @@ final class Session: CanvasHost {
         if selection == url { enqueuePrintWriteback(for: url) }
         frames.removeAll { $0.id == url }
         frameStates[url] = nil
+        editedFrames.remove(url)
         picked.remove(url)
+        persistCatalog()
         renderer.store.invalidatePrint(for: url)
         if frames.isEmpty {
             selection = nil
@@ -2764,6 +2813,7 @@ final class Session: CanvasHost {
     func frameOrderChanged() {
         draggedFrame = nil
         FrameOrder.save(frames.map(\.id))
+        persistCatalog()
     }
 
     /// Files let go over the window. Dropped from outside they are opened, as
@@ -2777,7 +2827,7 @@ final class Session: CanvasHost {
         guard !urls.isEmpty else { return }
         let listed = Set(frames.map { $0.id.standardizedFileURL })
         let known = urls.filter { listed.contains($0.standardizedFileURL) }
-        guard known.count == urls.count else { open(urls: urls); return }
+        guard known.count == urls.count else { append(urls: urls); return }
         if let own, urls.count == 1, urls[0].standardizedFileURL == own.standardizedFileURL { return }
         if urls.count == 1, let frame = frames.first(where: { $0.id.standardizedFileURL == urls[0].standardizedFileURL }) {
             click(frame.id)
@@ -2877,6 +2927,7 @@ final class Session: CanvasHost {
             lastSynced[url] = written
         }
         savedGeometry[url] = sidecar.geometry
+        if Self.hasEdits(sidecar) { editedFrames.insert(url) } else { editedFrames.remove(url) }
         if sidecar.params.cutsFrame { filmEdgeThumbnails.insert(url) } else { filmEdgeThumbnails.remove(url) }
     }
 
