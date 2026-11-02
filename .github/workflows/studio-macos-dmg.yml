@@ -1,0 +1,90 @@
+name: SpektraLab Studio macOS DMG
+
+on:
+  push:
+    branches:
+      - feature/studio-media-library
+    paths:
+      - ".github/workflows/studio-macos-dmg.yml"
+      - "modern_UI/**"
+      - "engine/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-dmg:
+    name: Build and package macOS
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.6
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcodebuild -version
+
+      - name: Install Metal compiler if needed
+        run: |
+          xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+
+      - name: Regenerate Xcode project for all new Swift files
+        run: |
+          python3 modern_UI/Spektrafilm/Tools/gen-project.py
+          python3 modern_UI/Spektrafilm/Tools/gen-project.py --check
+
+      - name: Build engine resources and Metal shaders
+        run: engine/build.sh bundle
+
+      - name: Build SpektraLab Studio (Apple Silicon)
+        working-directory: modern_UI/Spektrafilm
+        run: |
+          set -euo pipefail
+          xcodebuild -project Spektrafilm.xcodeproj -scheme Spektrafilm \
+            -configuration Release \
+            -destination 'generic/platform=macOS,arch=arm64' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            PRODUCT_NAME='SpektraLab Studio' \
+            PRODUCT_BUNDLE_IDENTIFIER='com.torychiu.spektralabstudio' \
+            build
+
+      - name: Verify app and make downloadable DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_DIR="modern_UI/Spektrafilm/build/DerivedData/Build/Products/Release"
+          APP="$APP_DIR/SpektraLab Studio.app"
+          if [ ! -d "$APP" ]; then
+            echo "::error::Expected app bundle missing: $APP"
+            ls -la "$APP_DIR"
+            exit 1
+          fi
+          mkdir -p dist/stage
+          ditto "$APP" "dist/stage/SpektraLab Studio.app"
+          # Ad-hoc identity avoids altering the upstream Developer ID signature.
+          codesign --force --deep --sign - "dist/stage/SpektraLab Studio.app"
+          codesign --verify --deep --strict --verbose=2 "dist/stage/SpektraLab Studio.app"
+          ln -s /Applications dist/stage/Applications
+          hdiutil create -volname 'SpektraLab Studio' \
+            -srcfolder dist/stage -format UDZO -ov \
+            dist/SpektraLab-Studio-macOS-arm64.dmg
+          shasum -a 256 dist/SpektraLab-Studio-macOS-arm64.dmg \
+            | tee dist/SHA256SUMS.txt
+
+      - name: Upload DMG and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: SpektraLab-Studio-macOS-arm64
+          path: |
+            dist/SpektraLab-Studio-macOS-arm64.dmg
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
