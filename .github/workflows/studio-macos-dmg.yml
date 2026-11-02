@@ -20,15 +20,15 @@ concurrency:
 jobs:
   build-dmg:
     name: Build and package macOS
-    runs-on: macos-26
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
-      - name: Select Xcode 26.6
+      - name: Select installed Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_26.6.app
+          xcode-select -p
           xcodebuild -version
 
       - name: Install Metal compiler if needed
