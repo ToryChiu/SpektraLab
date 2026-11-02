@@ -32,7 +32,8 @@ struct Filmstrip: View {
                             FilmstripCell(frame: frame,
                                           geometry: session.thumbnailGeometry(for: frame.id),
                                           framing: session.framing(of: frame.id),
-                                          state: session.frameStates[frame.id] ?? .unprocessed)
+                                          state: session.frameStates[frame.id] ?? .unprocessed,
+                                          edited: session.editedFrames.contains(frame.id))
                                 .id(frame.id)
                                 // Dragged along the strip a frame is moved
                                 // (`FrameReorder`); onto a pair's hole on the
@@ -144,6 +145,7 @@ struct FilmstripCell: View {
     let framing: FrameFraming
     /// Unread by this cell; kept as the guard test's construction seam.
     let state: FrameState
+    var edited = false
     var body: some View {
         CropMaskedThumbnail(url: frame.id, geometry: geometry) { image in
             cell(image)
@@ -166,6 +168,14 @@ struct FilmstripCell: View {
             .overlay(RoundedRectangle(cornerRadius: 2)
                 .stroke(Theme.selectionFrame, lineWidth: framing.lineWidth)
                 .opacity(framing.opacity))
+            .overlay(alignment: .bottomTrailing) {
+                if edited {
+                    Text("Edited").font(.system(size: 10, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 3)
+                        .background(.black.opacity(0.75), in: RoundedRectangle(cornerRadius: 3))
+                        .foregroundStyle(.white).padding(4)
+                }
+            }
         }
     }
 
